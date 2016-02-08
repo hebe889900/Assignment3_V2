@@ -4,18 +4,15 @@ package com.example.hebe889900.assignment3_v2;
 
         import java.io.BufferedOutputStream;
         import java.io.File;
-        import java.io.FileNotFoundException;
         import java.io.FileOutputStream;
         import java.io.IOException;
         import java.io.OutputStream;
-        import java.text.SimpleDateFormat;
-        import java.util.Date;
         import java.util.HashMap;
         import java.util.List;
         import java.util.Locale;
         import java.util.Map;
-        import android.annotation.SuppressLint;
         import android.app.Activity;
+        import android.app.AlertDialog;
         import android.content.Context;
         import android.content.Intent;
         import android.content.SharedPreferences;
@@ -23,15 +20,17 @@ package com.example.hebe889900.assignment3_v2;
         import android.hardware.Camera;
         import android.hardware.Camera.CameraInfo;
         import android.hardware.Camera.PictureCallback;
+        import android.hardware.Sensor;
+        import android.hardware.SensorEvent;
+        import android.hardware.SensorEventListener;
         import android.hardware.SensorManager;
         import android.location.Address;
         import android.location.Geocoder;
-        import android.location.LocationListener;
-        import android.location.LocationManager;
         import android.media.MediaScannerConnection;
         import android.net.Uri;
         import android.os.Bundle;
-        import android.os.Environment;
+        import android.os.CountDownTimer;
+        import android.os.Vibrator;
         import android.preference.PreferenceManager;
         import android.util.Log;
         import android.view.View;
@@ -39,10 +38,9 @@ package com.example.hebe889900.assignment3_v2;
         import android.view.WindowManager;
         import android.widget.ImageButton;
         import android.widget.LinearLayout;
-        import android.widget.TextView;
         import android.widget.Toast;
 
-public class MainActivity extends Activity {
+public class MainActivity extends Activity implements SensorEventListener {
     private Camera mCamera;
     private CameraPreview mPreview;
     private ImageButton capture, switchCamera,galleryMode;
@@ -56,6 +54,21 @@ public class MainActivity extends Activity {
     public static Map<String, String> AddressList;
     final String LOG_TAG ="Camera Direct Access";
     public static String filename = PhotoHelper.getPhotoDirectory().getAbsolutePath();
+    private SensorManager sensorManager;
+    private Sensor accelerometer;
+
+    private float lastX, lastY, lastZ;
+
+    private float deltaXMax = 0;
+    private float deltaYMax = 0;
+    private float deltaZMax = 0;
+
+    private float deltaX = 0;
+    private float deltaY = 0;
+    private float deltaZ = 0;
+
+    private float vibrateThreshold = 0;
+    public Vibrator v;
 
 
     @Override
@@ -65,9 +78,24 @@ public class MainActivity extends Activity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         myContext = this;
         initialize();
+        initializeSensor();
     }
 
 
+    public void initializeSensor(){
+        sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        if (sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) != null) {
+            // success! we have an accelerometer
+            accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+            sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_NORMAL);
+            vibrateThreshold = accelerometer.getMaximumRange() / 2;
+        } else {
+            // fai! we dont have an accelerometer!
+        }
+
+        //initialize vibration
+        v = (Vibrator) this.getSystemService(Context.VIBRATOR_SERVICE);
+    }
 
     public void initialize() {
         cameraPreview = (LinearLayout) findViewById(R.id.camera_preview);
@@ -84,7 +112,6 @@ public class MainActivity extends Activity {
         galleryMode = (ImageButton) findViewById(R.id.Button01);
         galleryMode.setOnClickListener(galleryModeListener);
     }
-
 
     OnClickListener captureListener = new OnClickListener() {
         @Override
@@ -340,5 +367,48 @@ public class MainActivity extends Activity {
     }
 
 
+    @Override
+    public void onSensorChanged(SensorEvent event) {
+        // get the change of the x,y,z values of the accelerometer
+        deltaX = Math.abs(lastX - event.values[0]);
+        deltaY = Math.abs(lastY - event.values[1]);
+        deltaZ = Math.abs(lastZ - event.values[2]);
 
+        // if the change is below 2, it is just plain noise
+        if (deltaX < 2)
+            deltaX = 0;
+        if (deltaY < 2)
+            deltaY = 0;
+        if ((deltaX > vibrateThreshold)|| (deltaY > vibrateThreshold) || (deltaZ > vibrateThreshold)) {
+            vibrateThreshold = 30;
+            mCamera.takePicture(null, null, new Camera.PictureCallback() {
+                @Override
+                public void onPictureTaken(byte[] bytes, Camera camera) {
+                    onPictureJpeg(bytes, camera, MainActivity.this);
+                }
+
+            });
+            final AlertDialog alertDialog = new AlertDialog.Builder(this).create();
+            alertDialog.setTitle("Friendly Reminder");
+            alertDialog.setMessage("Wait for saving the photo...");
+            alertDialog.show();   //
+            new CountDownTimer(4000, 1000) {
+                @Override
+                public void onTick(long millisUntilFinished) {
+                }
+
+                @Override
+                public void onFinish() {
+                    alertDialog.setMessage("Done!");
+                    alertDialog.hide();
+                    vibrateThreshold = accelerometer.getMaximumRange() / 2;
+                }
+            }.start();
+        }
+    }
+
+    @Override
+    public void onAccuracyChanged(Sensor sensor, int i) {
+
+    }
 }
